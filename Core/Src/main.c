@@ -175,53 +175,47 @@ int main(void)
 
 
 
-  bool sd_ok = false;
+  /* ===================================================================
+   * SD card + firmware update — ŞİMDİLİK DEVRE DIŞI
+   * --------------------------------------------------------------------
+   * Boot süresini 25 saniyeye uzatıyor (HAL_SD_Init / f_mount yavaş).
+   * Firmware download flow geliştirildiğinde, app SD'ye dosyayı yazınca
+   * bir backup register flag set edip MCU'yu reset eder; bootloader
+   * burada o flag'i okur, sadece set ise SD init + flash sequence çalışır,
+   * normalde direkt QSPI memory-mapped'a alıp app'e jump eder.
+   *
+   * Tasarım taslağı (henüz uygulanmadı):
+   *   if (HAL_PWR_CSDxxx & FW_UPDATE_FLAG) {
+   *       // SD init + UpdateFirmwareFromSD()
+   *       HAL_PWR_CSDxxx &= ~FW_UPDATE_FLAG;
+   *   }
+   * =================================================================== */
 
-  MX_SDMMC1_SD_Init();
-  MX_FATFS_Init();
-
-  uint32_t start = HAL_GetTick();
-
-  FATFS fs;
-
-
-  if (HAL_SD_Init(&hsd1) == HAL_OK)
-  {
-      if ((HAL_GetTick() - start) < 500)
-      {
-          if (f_mount(&fs, "", 1) == FR_OK)
-          {
-              sd_ok = true;
-          }
-      }
-  }
-
-  if (sd_ok)
-  {
-     //  Init QSPI for flashing
-      HAL_QSPI_MspDeInit(&hqspi);
-      HAL_QSPI_MspInit(&hqspi);
-
-      if (CSP_QUADSPI_Init() == HAL_OK)
-      {
-          if (UpdateFirmwareFromSD() == FR_OK)
-          {
-              // Delete firmware so it flashes ONLY ONCE
-              f_unlink(FW_FILENAME);
-          }
-      }
-
-      // Clean FATFS
-      f_mount(0, "", 0);
-  }
-
- //  ================= SD CLEANUP =================
-
-  HAL_SD_Abort(&hsd1);
-  HAL_SD_DeInit(&hsd1);
-  HAL_SD_MspDeInit(&hsd1);
-
-  __HAL_RCC_SDMMC1_CLK_DISABLE();
+  /* bool sd_ok = false;
+   * MX_SDMMC1_SD_Init();
+   * MX_FATFS_Init();
+   * uint32_t start = HAL_GetTick();
+   * FATFS fs;
+   * if (HAL_SD_Init(&hsd1) == HAL_OK) {
+   *     if ((HAL_GetTick() - start) < 500) {
+   *         if (f_mount(&fs, "", 1) == FR_OK) { sd_ok = true; }
+   *     }
+   * }
+   * if (sd_ok) {
+   *     HAL_QSPI_MspDeInit(&hqspi);
+   *     HAL_QSPI_MspInit(&hqspi);
+   *     if (CSP_QUADSPI_Init() == HAL_OK) {
+   *         if (UpdateFirmwareFromSD() == FR_OK) {
+   *             f_unlink(FW_FILENAME);
+   *         }
+   *     }
+   *     f_mount(0, "", 0);
+   * }
+   * HAL_SD_Abort(&hsd1);
+   * HAL_SD_DeInit(&hsd1);
+   * HAL_SD_MspDeInit(&hsd1);
+   * __HAL_RCC_SDMMC1_CLK_DISABLE();
+   */
 
  //  ================= QSPI BOOT =================
 
