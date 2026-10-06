@@ -501,7 +501,9 @@ void SystemClock_Config(void)
  * ─────────────────────────────────────────────────────────────────── */
 static bool FwUpdate_CheckAndApply(void)
 {
-    __HAL_RCC_PWR_CLK_ENABLE();
+    /* On STM32H7 PWR is always clocked (no __HAL_RCC_PWR_CLK_ENABLE),
+     * so we only need to unlock backup-domain writes and clock the
+     * RTC APB block to read BKP0R. */
     HAL_PWR_EnableBkUpAccess();
     __HAL_RCC_RTC_ENABLE();
 
