@@ -80,6 +80,21 @@ pFunction JumpToApplication;
 #define FW_FILENAME        "newfirmware.bin"
 #define FW_BUFFER_SIZE     4096
 
+/* ──────────────────────────────────────────────────────────────────────
+ * OTA handshake with the application image.
+ *
+ * The application writes FW_UPDATE_MAGIC into RTC->BKP0R just before it
+ * triggers NVIC_SystemReset(). On the resulting cold-ish boot we see
+ * the magic here, run the SD→QSPI flash sequence, clear the magic, and
+ * either jump to the (now new) application or stop forever if the flash
+ * failed. Without the magic we take the normal fast path and never
+ * touch the SD card — boot stays ~instant.
+ *
+ * The magic value is "FWOK" in ASCII; it must match the value the app
+ * writes (see vendingPrj's fwdl_download.c).
+ * ─────────────────────────────────────────────────────────────────── */
+#define FW_UPDATE_MAGIC    0x46574F4BUL   /* "FWOK" */
+
 /**QUADSPI GPIO Configuration
    PB6     ------> QUADSPI_BK1_NCS
    PF7     ------> QUADSPI_BK1_IO2
@@ -123,6 +138,11 @@ int __io_putchar(int ch) {
 }
 
 FRESULT UpdateFirmwareFromSD(void);
+
+/* Returns true if an OTA pass actually ran (regardless of success/fail).
+ * On flash failure this function does NOT return — it halts in while(1)
+ * so we never jump to a half-erased QSPI image. */
+static bool FwUpdate_CheckAndApply(void);
 /* USER CODE END 0 */
 
 /**
@@ -172,6 +192,14 @@ int main(void)
   // Bu OnOff Pinini On yapmazsak ekran siyah oluyor
 
 
+  /* ───────────────────────────────────────────────────────────────
+   * OTA stage: if the app staged a new image on SD and set the magic
+   * before resetting, write it to QSPI now. Returns false (and takes
+   * no measurable time) in the normal boot case — the fast path below
+   * is unchanged. On fatal flash failure this halts; it never returns
+   * false to let us jump into a corrupt image.
+   * ─────────────────────────────────────────────────────────────── */
+  (void)FwUpdate_CheckAndApply();
 
 
 
@@ -457,6 +485,65 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/* ──────────────────────────────────────────────────────────────────────
+ * OTA entry point. Called very early from main() — before QSPI is
+ * memory-mapped and before any irq/clock gymnastics.
+ *
+ * No magic in BKP0R → return immediately, main() stays on the fast
+ * path and the SD card is never clocked.
+ *
+ * Magic present → clear it (so we never retry an identical failure
+ * forever), mount SD, run UpdateFirmwareFromSD(), delete the staging
+ * file on success, and tear SD down. If flashing failed we halt here;
+ * jumping into a half-erased QSPI image would be worse than a visibly
+ * stuck bootloader.
+ * ─────────────────────────────────────────────────────────────────── */
+static bool FwUpdate_CheckAndApply(void)
+{
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+    __HAL_RCC_RTC_ENABLE();
+
+    uint32_t flag = RTC->BKP0R;
+    if (flag != FW_UPDATE_MAGIC) {
+        return false;
+    }
+
+    /* Clear immediately — a crash during flashing must NOT loop here
+     * forever on every subsequent reset. One shot only. */
+    RTC->BKP0R = 0UL;
+
+    MX_SDMMC1_SD_Init();
+    MX_FATFS_Init();
+
+    FATFS fs;
+    FRESULT mr = f_mount(&fs, "", 1);
+    FRESULT ur = FR_INT_ERR;
+
+    if (mr == FR_OK) {
+        ur = UpdateFirmwareFromSD();
+        if (ur == FR_OK) {
+            f_unlink(FW_FILENAME);  /* staging file no longer needed */
+        }
+        f_mount(0, "", 0);
+    }
+
+    /* Release SD so the application can own it later. */
+    HAL_SD_DeInit(&hsd1);
+    __HAL_RCC_SDMMC1_CLK_DISABLE();
+
+    if (mr != FR_OK || ur != FR_OK) {
+        /* Flash is possibly half-erased. Do NOT jump — recover via SWD. */
+        __disable_irq();
+        while (1) {
+            /* Debugger can halt here and inspect mr/ur to see which stage
+             * failed. If a status LED gets wired later, blink it here. */
+        }
+    }
+
+    return true;
+}
 
 FRESULT UpdateFirmwareFromSD(void)
 {
