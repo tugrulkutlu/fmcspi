@@ -126,6 +126,31 @@ void HAL_QSPI_MspInit(QSPI_HandleTypeDef* qspiHandle)
 
   /* USER CODE BEGIN QUADSPI_MspInit 1 */
 
+    /* CubeMX generates these pins with GPIO_SPEED_FREQ_LOW (~12 MHz class),
+     * but QUADSPI runs at HCLK/2 (32 MHz) with a memory-mapped app executing
+     * from it. Slow edges -> corrupted reads/instruction fetches in the app.
+     * Re-apply the same AF with VERY_HIGH speed. Kept in USER CODE so
+     * regenerating from the .ioc does not drop it. */
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+
+    GPIO_InitStruct.Pin = GPIO_PIN_6;                 /* NCS */
+    GPIO_InitStruct.Alternate = GPIO_AF10_QUADSPI;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_6;      /* IO2, IO3 */
+    GPIO_InitStruct.Alternate = GPIO_AF9_QUADSPI;
+    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_9|GPIO_PIN_8;      /* IO1, IO0 */
+    GPIO_InitStruct.Alternate = GPIO_AF10_QUADSPI;
+    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_2;                 /* CLK */
+    GPIO_InitStruct.Alternate = GPIO_AF9_QUADSPI;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /* USER CODE END QUADSPI_MspInit 1 */
   }
 }
